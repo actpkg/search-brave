@@ -1,0 +1,11 @@
+[std]
+name = "search-brave"
+
+[std.capabilities."wasi:http"]
+description = """
+Queries the Brave Search API. The address is fixed at build time, so this component \
+cannot reach anything else — the ceiling below is a property of the artifact, not of \
+how it happens to be deployed."""
+
+[[std.capabilities."wasi:http".allow]]
+host = "api.search.brave.com"
