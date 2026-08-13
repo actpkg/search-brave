@@ -1,7 +1,7 @@
 [package]
 name = "component-search-brave"
 description = "Search the web with the Brave Search API"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 keywords = ["act", "search", "brave", "websearch", "wasm"]
 license = "MIT OR Apache-2.0"
