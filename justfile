@@ -26,8 +26,14 @@ build:
 pack:
     {{actbuild}} pack {{wasm}}
 
-test: build
-    ACT="{{act}}" uv run --project e2e pytest e2e/ -v
+test: test-unit build
+    cd e2e && ACT="{{act}}" WASM="../{{wasm}}" cargo test
+
+# Unit tests (creds.rs, and the open-args schema). Host target, not the crate's
+# default wasm32-wasip2 (set in .cargo/config.toml) — these run on the host,
+# not under wasmtime.
+test-unit:
+    cargo test --target x86_64-unknown-linux-gnu
 
 publish: build
     #!/usr/bin/env bash

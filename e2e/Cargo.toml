@@ -1,0 +1,20 @@
+[package]
+# Unique per component: machines that share one cargo build-dir collide
+# same-name crates on the fingerprint slot, and a suite can then run
+# another component's test binary.
+name = "e2e-search-brave"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Detach from any outer workspace this component may sit in.
+[workspace]
+
+[dev-dependencies]
+rmcp = { version = "3.5", features = ["client", "transport-child-process"] }
+# `net` is kept from the scaffold's list even though no test here binds a stub
+# server: the component's endpoint is fixed by its ceiling (api.search.brave.com
+# in act.toml), so this suite has nothing to point a TcpListener at — dropping
+# the feature would also work.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "net"] }
+serde_json = "1"
