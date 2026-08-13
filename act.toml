@@ -9,3 +9,26 @@ how it happens to be deployed."""
 
 [[std.capabilities."wasi:http".allow]]
 host = "api.search.brave.com"
+
+# Bare table: the class takes no parameters. An undeclared class is always
+# denied and no grant can widen it, so without this the component cannot reach
+# the credential store however it is run.
+[std.capabilities."act:credentials"]
+description = """
+Reads the Brave subscription token from the host credential store. The token is \
+never a tool or session argument, so it never reaches the agent's context."""
+
+# Declared so `act login <ref>` prompts for the token with zero arguments. The
+# field name is in this component's own namespace because no field name is
+# well-known (ACT-CONSTANTS §8 registers types, not names) — and because a
+# `std:`-prefixed field key is refused at pack time.
+[[std.credentials]]
+# `default` is `creds::DEFAULT_CREDENTIAL_KEY` — the key a session uses when its
+# args do not name one. Declaring any other key here would prompt for a
+# credential the component never asks for.
+key = "default"
+description = "Brave Search subscription token"
+
+[[std.credentials.fields]]
+key = "brave:api-key"
+label = "Brave Web Search token"

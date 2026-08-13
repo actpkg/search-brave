@@ -3,10 +3,12 @@
 The suite drives the packed component through `act run --mcp` over stdio with
 a real MCP client, so what the tests observe is what an agent observes.
 
-search-brave is a session-provider: the Brave subscription token is a secret
-that travels via session args, never tool arguments (see src/lib.rs's module
-docs — a dataflow node's `params` live in a published, signed flow document,
-so a credential must never go there). Every real `search` call needs
+search-brave is a session-provider, but the Brave subscription token is no
+longer carried by a session argument: since 0.2.0 the session names a
+credential *key* and the token itself is fetched from the host credential
+store on the first tool call (see src/lib.rs's module docs — `get-secret`
+needs a session the host has already marked live, so the fetch cannot happen
+inside `open-session` at all). Every real `search` call needs
 `std:session-id` in its metadata. This suite gets that id from the virtual
 `open_session`/`close_session` tools the MCP adapter synthesises for any
 session-provider component — the path an agent actually uses — rather than
@@ -16,7 +18,8 @@ none at all). Session-of-1 itself is covered by act-cli's own
 `tests/session_of_1_mcp.rs` suite.
 
 No live Brave API key or endpoint is used anywhere in this suite — see the
-module docstring on `test_search.py` for what that does and does not cover.
+module docstrings on `test_search.py` and `test_credentials.py` for what that
+does and does not cover.
 """
 
 import asyncio
@@ -91,20 +94,28 @@ def wasm_path(act_command: list[str]) -> Path:
 async def client(act_command: list[str], wasm_path: Path):
     """A connected MCP client, one `act` process per test.
 
-    `--allow wasi:http` moved here verbatim from the old justfile's `grants`
-    variable — the component's own ceiling already scopes it to
-    `api.search.brave.com` (act.toml), so opening the class grants exactly
-    that host, nothing wider. Every test needs it (even the ones that never
-    reach the network: session validation happens before any HTTP call, but
-    the grant is checked at component start, not per-call), so it is
-    unconditional here rather than per-test.
+    `--allow wasi:http --allow act:credentials` — the component's own ceiling
+    already scopes `wasi:http` to `api.search.brave.com` and declares
+    `act:credentials` as a bare table (act.toml), so opening the two classes
+    grants exactly that, nothing wider. Every test needs both (even the ones
+    that never reach the network or the store: session validation happens
+    before either, but the grants are checked at component start, not
+    per-call), so they are unconditional here rather than per-test.
+
+    No `--credentials-backend`, so this client reads the platform's default
+    store. Nothing in this suite depends on what that store holds: every test
+    using this fixture fails before `get-secret` is reached. The one module
+    that does reach it brings its own store — see `test_credentials.py`.
 
     Function-scoped, one client per test: a session opened in one test must
     not leak into the next.
     """
     transport = StdioTransport(
         command=act_command[0],
-        args=[*act_command[1:], "run", str(wasm_path), "--mcp", "--allow", "wasi:http"],
+        args=[
+            *act_command[1:], "run", str(wasm_path), "--mcp",
+            "--allow", "wasi:http", "--allow", "act:credentials",
+        ],
         keep_alive=False,
         log_file=LOG_FILE,
     )
@@ -125,18 +136,19 @@ async def client(act_command: list[str], wasm_path: Path):
 
 @pytest.fixture
 async def session(client) -> str:
-    """A per-test session, opened via the virtual `open_session` tool with a
-    placeholder credential and closed after the test.
+    """A per-test session, opened via the virtual `open_session` tool with no
+    arguments at all and closed after the test.
 
-    The placeholder is never validated against Brave — see `test_search.py`'s
-    module docstring — so any non-empty string does the job; every test that
-    uses this fixture is exercising session-scoped *validation*, not a real
-    search. The id arrives in `content[0].text` as JSON, not
-    `structured_content`: the virtual session tools build their
-    `CallToolResult` by hand in `rmcp_bridge.rs` and bypass the normal
-    content-part folding that would otherwise structure a lone JSON object.
+    No arguments is the whole point: the token is not one, and naming a
+    `credential_key` is only needed when a deployment keeps more than one
+    credential. Opening a session touches neither the store nor the network,
+    so this fixture is as cheap as it looks. The id arrives in
+    `content[0].text` as JSON, not `structured_content`: the virtual session
+    tools build their `CallToolResult` by hand in `rmcp_bridge.rs` and bypass
+    the normal content-part folding that would otherwise structure a lone
+    JSON object.
     """
-    opened = await client.call_tool("open_session", {"api_key": "e2e-placeholder-token"})
+    opened = await client.call_tool("open_session", {})
     sid = json.loads(opened.content[0].text)["id"]
     yield sid
     await client.call_tool("close_session", {"session_id": sid})
@@ -162,7 +174,7 @@ def expect_error():
 
     The JSON-RPC error path exists for failures that are not the guest's tool
     body: `list-tools`, the session *operations themselves* (`open_session`
-    with an empty `api_key` fails here — confirmed empirically:
+    with a malformed `credential_key` fails here — confirmed empirically:
     `virtual_open_session` in rmcp_bridge.rs propagates the guest's error
     with `?`, which rmcp turns into a JSON-RPC error, not an isError result),
     a wasmtime trap, an unreachable actor. It raises

@@ -1,18 +1,24 @@
 [package]
 name = "component-search-brave"
 description = "Search the web with the Brave Search API"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 keywords = ["act", "search", "brave", "websearch", "wasm"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/actpkg/search-brave"
 
 [dependencies]
-act-sdk = "0.14"
+act-sdk = "0.14.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "1"
-wasi-fetch = "0.2.0"
+# Credential field values cross the WIT boundary as CBOR; `Secret::field_str`
+# hands back a `ciborium::Value`, and creds.rs's host-target tests build one.
+ciborium = "0.2"
+# `default-features = false` drops cookies/cache/decompression this tool
+# does not use; `idn` stays on so non-ASCII hostnames resolve.
+hclient = { version = "0.1.0-alpha.18", default-features = false, features = ["idn"] }
+hclient-wasi = "0.1.5"
 form_urlencoded = "1"
 
 [profile.release]

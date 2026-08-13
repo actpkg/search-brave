@@ -16,22 +16,40 @@ Create a **Web Search** subscription token at
 [api-dashboard.search.brave.com](https://api-dashboard.search.brave.com/). The free tier
 allows one request per second.
 
-## The key goes in session args, not tool arguments
+A human stores it once, with either of these:
+
+```bash
+act login search-brave.wasm                    # prompts for it, no arguments
+act secret set search-brave.wasm --key default \
+  --field brave:api-key --fields-stdin         # {"brave:api-key": "<token>"}
+```
+
+## You never see the token, and you must not ask for one
+
+**Do not ask the user to paste their Brave token, and do not put one in any argument.**
+There is nowhere to put it: neither `search` nor `open_session` has a field for a
+credential. The component reads it from the host credential store on its first tool call.
 
 ```bash
 # one-shot
 act call search-brave.wasm search \
   --args '{"query":"wasm component model","count":5}' \
-  --session-args '{"api_key":"YOUR_TOKEN"}' \
-  --allow wasi:http
+  --session-args '{}' \
+  --allow wasi:http --allow act:credentials
 ```
 
-Over MCP or HTTP, open a session first and pass `std:session-id` on each call.
+Over MCP, call `open_session` (no arguments) and pass its id as `std:session-id` metadata
+on each `search` call, then `close_session` when done.
 
-This is deliberate. A credential passed as a tool argument would end up in a dataflow
-graph's node parameters, and those live in the flow document — which gets published and
-signed. Session args come from the run context instead, where they can be marked secret
-and redacted from traces.
+`open_session` takes one optional argument, `credential_key`, naming which stored
+credential to search with; it defaults to `default`. Pass it only when the user has told
+you they keep more than one Brave token. It is a lookup name — letters, digits, `-`, `_`
+and `.` — not a sentence: a human may be shown it while deciding whether to release the
+credential, so anything else is refused.
+
+If a call comes back `std:credential-required`, no usable token is stored (or policy
+denies the store). Relay the command in the message to the user and stop — that error is
+not something you can work around, and retrying will not change it.
 
 ## Tools
 
@@ -79,8 +97,12 @@ This component returns links and snippets, not page content. Pass the URLs to
 `http-client` and convert with an HTML→Markdown component. Keeping the steps separate
 means each declares its own, narrower network ceiling.
 
-## Capability
+## Capabilities
 
-Declares `wasi:http` limited to **`api.search.brave.com`** and nothing else. Because the
-endpoint is fixed at build time, that ceiling is a property of the artifact: no
-deployment can widen it, and `act info` shows it before you ever run the component.
+* `wasi:http`, limited to **`api.search.brave.com`** and nothing else. Because the
+  endpoint is fixed at build time, that ceiling is a property of the artifact: no
+  deployment can widen it, and `act info` shows it before you ever run the component.
+* `act:credentials` — read the one stored Brave token. A bare class with no parameters.
+
+A run needs both released: `--allow wasi:http --allow act:credentials`. Without the
+second, every search fails with `std:credential-required` however the token was stored.

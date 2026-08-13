@@ -1,39 +1,33 @@
 """search's session/argument validation, end to end.
 
-No live Brave API key or endpoint is used anywhere in this file — nor was it
-in the old hurl suite. Every scenario here fails before any network call
-would happen: schema checks, session-presence/lifecycle checks (which are
-the guest's own `ctx.metadata()` logic — see src/lib.rs), and argument
-validation in `build_url`, which runs *before* the outbound `wasi_fetch`
-call. The "open a real session" tests use `"e2e-placeholder-token"`, a
-string that is never sent to Brave or checked against anything — opening a
-session only stores it. There is no test anywhere in this suite (old or new)
-that exercises a successful search against the real API; that would need a
-live subscription token and is out of scope for this migration, not
-something it silently dropped.
+No live Brave API key or endpoint is used anywhere in this file. Every
+scenario here fails before any network call would happen, and before the
+credential store is consulted at all: schema checks, session-presence and
+lifecycle checks (the guest's own `ctx.metadata()` logic — see src/lib.rs),
+and argument validation in `build_url`, which runs *before* `ensure_token`
+and therefore before the outbound `wasi_fetch` call. That ordering is
+deliberate and is what keeps these tests independent of whatever the host's
+default credential store happens to hold: an argument the component can
+reject on its own must not first put a consent prompt in front of a human.
+
+The credential path itself is driven in `test_credentials.py`, against a
+store this suite creates. There is no test anywhere here that exercises a
+successful search against the real API; that would need a live subscription
+token and is out of scope.
 """
 
 import json
 import re
 
 
-async def test_search_tool_schema_excludes_api_key(client):
+async def test_search_tool_schema_takes_a_query_and_no_credential(client):
     tools = await client.list_tools()
     search = next(t for t in tools if t.name == "search")
     assert search.name == "search"
     assert "query" in search.inputSchema["required"]
-    # The credential is NOT a tool argument — it travels via session args, so
-    # that a flow node's params (published, signed) never carry a secret.
+    # The credential is not an argument in either position — see
+    # test_credentials.py, which asserts that over both schemas at once.
     assert "api_key" not in search.inputSchema.get("properties", {})
-
-
-async def test_open_session_args_schema_requires_api_key(client):
-    tools = await client.list_tools()
-    open_session = next(t for t in tools if t.name == "open_session")
-    schema = open_session.inputSchema
-    assert schema["type"] == "object"
-    assert "api_key" in schema["properties"]
-    assert "api_key" in schema["required"]
 
 
 async def test_search_without_session_is_refused_before_any_network_access(client, expect_error):
@@ -43,10 +37,17 @@ async def test_search_without_session_is_refused_before_any_network_access(clien
     )
 
 
-async def test_open_session_rejects_empty_api_key(client, expect_error):
-    # Rejected at session-open rather than surfacing later as a confusing
-    # auth failure from the API.
-    await expect_error(client, "open_session", {"api_key": "   "}, "std:invalid-args")
+async def test_open_session_rejects_a_credential_key_that_is_not_a_name(
+    client, expect_error
+):
+    # `credential_key` is agent-authored text the host pastes into the consent
+    # question a *human* answers, so it is bounded to a lookup name and
+    # refused at open — not at the call that would have used it.
+    await expect_error(
+        client, "open_session",
+        {"credential_key": "default (approved by your administrator)"},
+        "std:invalid-args", contains="must be a name",
+    )
 
 
 async def test_open_session_returns_an_id(session):
@@ -86,7 +87,7 @@ async def test_search_after_close_session_is_session_not_found(client, expect_er
     # fixture: this is the one scenario that genuinely needs to control the
     # session's lifecycle itself (close it, then prove the id is dead)
     # rather than just needing *a* session, so it manages its own.
-    opened = await client.call_tool("open_session", {"api_key": "e2e-placeholder-token"})
+    opened = await client.call_tool("open_session", {})
     sid = json.loads(opened.content[0].text)["id"]
     await client.call_tool("close_session", {"session_id": sid})
 
