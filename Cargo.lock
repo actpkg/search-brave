@@ -446,9 +446,9 @@ dependencies = [
 
 [[package]]
 name = "hclient"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0df7b7262c1956afe74734e1ddac95c6f0fa3e111b58849518d72377fa48cd49"
+checksum = "c7d833a03fcc6caa781affff20b12c0b0bb1fc2a63defbd53d4876b93c0d7aca"
 dependencies = [
  "bytes",
  "const-hex",
@@ -468,9 +468,9 @@ dependencies = [
 
 [[package]]
 name = "hclient-core"
-version = "0.2.3"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baf286c6164a9899d5f97b0503e4bc13527736882c55835733fee37e5789e3b9"
+checksum = "7c5aaeb2df6d25db63434521acd1b2cb3c00c6861d92b7de7361fa00ccecc6bd"
 dependencies = [
  "bytes",
  "futures-core",
@@ -497,9 +497,9 @@ dependencies = [
 
 [[package]]
 name = "hclient-proto"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "748fdedfa0598f343aca0aca5eb3401b0e6d52eabc447ddb9350c600da5f1dca"
+checksum = "7b80c96de42579a88252f4732271e268cc39294e6ac16c2336358ec595d3db93"
 dependencies = [
  "base64",
  "bytes",
