@@ -62,7 +62,7 @@ fn wasm_path() -> PathBuf {
     let path = PathBuf::from(std::env::var("WASM").unwrap_or_else(|_| {
         concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../target/wasm32-wasip2/release/component_search_brave.wasm"
+            "/../target/wasm32-wasip3/release/component_search_brave.wasm"
         )
         .into()
     }));

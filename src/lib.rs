@@ -278,12 +278,16 @@ fn build_url(args: &SearchArgs) -> ActResult<String> {
 mod component {
     use super::*;
 
-    thread_local! {
-        /// One entry per open session. It holds the *name* of a credential and,
-        /// once a tool call has fetched it, that credential's token — never
-        /// anything the agent supplied.
-        static SESSIONS: SessionRegistry<SessionState> = SessionRegistry::new("search-brave");
-    }
+    /// One entry per open session. It holds the *name* of a credential and,
+    /// once a tool call has fetched it, that credential's token — never
+    /// anything the agent supplied.
+    ///
+    /// A plain `static`, not `thread_local!`: under wasip3 every host fiber
+    /// gets its own TLS, so a `thread_local` registry would be repopulated
+    /// from scratch on every tool call and no session would survive between
+    /// them. See the `act_sdk::sessions` module docs.
+    static SESSIONS: std::sync::LazyLock<SessionRegistry<SessionState>> =
+        std::sync::LazyLock::new(|| SessionRegistry::new("search-brave"));
 
     /// What a session remembers.
     ///
@@ -341,20 +345,16 @@ mod component {
     #[session_open]
     fn open(args: OpenArgs) -> ActResult<String> {
         creds::validate_key(&args.credential_key)?;
-        Ok(SESSIONS.with(|r| {
-            r.insert(SessionState {
-                credential_key: args.credential_key,
-                token: None,
-                credential_rejected: false,
-            })
+        Ok(SESSIONS.insert(SessionState {
+            credential_key: args.credential_key,
+            token: None,
+            credential_rejected: false,
         }))
     }
 
     #[session_close]
     fn close(session_id: String) {
-        SESSIONS.with(|r| {
-            r.remove(&session_id);
-        });
+        SESSIONS.remove(&session_id);
     }
 
     fn unknown_session(session_id: &str) -> ActError {
@@ -371,7 +371,7 @@ mod component {
     /// component import with no host implementation.
     fn poisoned(session_id: &str) -> Option<ActError> {
         SESSIONS
-            .with(|r| r.with(session_id, |s| s.credential_rejected))
+            .with(session_id, |s| s.credential_rejected)
             .unwrap_or(false)
             .then(|| {
                 ActError::new(
@@ -449,7 +449,7 @@ mod component {
         // outer `None` is "no such session", an inner `None` is "this session
         // has not fetched yet". Collapsing them would report an unknown
         // session for every first call.
-        match SESSIONS.with(|r| r.with(session_id, |s| s.token.clone())) {
+        match SESSIONS.with(session_id, |s| s.token.clone()) {
             None => return Err(unknown_session(session_id)),
             Some(Some(token)) => return Ok(token),
             Some(None) => {}
@@ -460,7 +460,7 @@ mod component {
             return Err(e);
         }
         let key = SESSIONS
-            .with(|r| r.with(session_id, |s| s.credential_key.clone()))
+            .with(session_id, |s| s.credential_key.clone())
             .ok_or_else(|| unknown_session(session_id))?;
 
         let raw =
@@ -477,7 +477,7 @@ mod component {
         let token = creds::from_secret(&secret, &key)?;
 
         SESSIONS
-            .with(|r| r.with_mut(session_id, |s| s.token = Some(token.clone())))
+            .with_mut(session_id, |s| s.token = Some(token.clone()))
             .ok_or_else(|| unknown_session(session_id))?;
         Ok(token)
     }
@@ -500,7 +500,7 @@ mod component {
             )
         })?;
         let credential_key = SESSIONS
-            .with(|r| r.with(&session_id, |s| s.credential_key.clone()))
+            .with(&session_id, |s| s.credential_key.clone())
             .ok_or_else(|| unknown_session(&session_id))?;
 
         // The URL is built before the credential is fetched: an argument this
@@ -559,7 +559,7 @@ mod component {
             // query are the failures that change on their own, and both arrive
             // here with a different kind.
             if err.kind == creds::ERR_CREDENTIAL_REQUIRED {
-                SESSIONS.with(|r| r.with_mut(&session_id, |s| s.credential_rejected = true));
+                SESSIONS.with_mut(&session_id, |s| s.credential_rejected = true);
             }
             return Err(err);
         }
@@ -594,10 +594,12 @@ mod component {
         })
     }
 
-    /// The tests that assert on `SESSIONS` read an empty registry as a fact
-    /// about themselves, not about the process: the registry is a
-    /// `thread_local!` and libtest gives each test its own thread, so no test
-    /// sees another's sessions — including under `--test-threads=1`.
+    /// The tests that assert on `SESSIONS` each open their own session and
+    /// address it by the id `open` returned. The registry is a plain `static`
+    /// shared by every test in the process — it was a `thread_local!` before
+    /// the wasip3 migration, and libtest's per-test threads then gave each
+    /// test a private copy — so "the registry is empty" is not something a
+    /// test may assume; only that a freshly returned id is fresh.
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -699,7 +701,7 @@ mod component {
             // The property ACT-AUTH §1.1.4 forces: no credential is fetched at
             // open, so the session starts with none cached.
             let (token, poisoned) = SESSIONS
-                .with(|r| r.with(&id, |s| (s.token.clone(), s.credential_rejected)))
+                .with(&id, |s| (s.token.clone(), s.credential_rejected))
                 .expect("the session exists");
             assert!(token.is_none(), "open must not have reached the store");
             assert!(!poisoned);
@@ -722,7 +724,7 @@ mod component {
             .expect("opens");
             assert!(poisoned(&id).is_none(), "a fresh session is not poisoned");
 
-            SESSIONS.with(|r| r.with_mut(&id, |s| s.credential_rejected = true));
+            SESSIONS.with_mut(&id, |s| s.credential_rejected = true);
             let err = poisoned(&id).expect("a rejected credential poisons the session");
             assert_eq!(err.kind, act_sdk::constants::ERR_CAPABILITY_DENIED);
             assert!(
