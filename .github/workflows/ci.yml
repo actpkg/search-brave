@@ -80,7 +80,7 @@ jobs:
           bins: wkg, just
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: sigstore/cosign-installer@v4.1.2   # defaults to cosign 3.x → OCI 1.1 referrer signatures
+      - uses: sigstore/cosign-installer@v4.1.3   # defaults to cosign 3.x → OCI 1.1 referrer signatures
       - run: just init
       - name: Publish
         id: publish
